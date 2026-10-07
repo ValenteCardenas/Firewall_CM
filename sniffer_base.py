@@ -7,18 +7,18 @@ from flow_table import FlowTable
 
 def parse_ethernet_header(data):
     "debemos primero extraer el protocolo ethernet y el payload"
-    eth_header = struct.unpack("!6s6sH", data[0:14])
-    eth_protocol = eth_header[2]
-    return eth_protocol, data[14:]
+    eth_header = struct.unpack("!6s6sH", data[0:14]) # ! indica que los datos estan en formato little endian, 6s6sH indica que los primeros dos campos son de 6 bytes y el ultimo de 2 bytes. [0:14] es porque la cabecera ethernet tiene 14 bytes de longitud
+    eth_protocol = eth_header[2] #nos quedamos con el ultimo valor que es el protocolo
+    return eth_protocol, data[14:]#el payload es todo lo que viene despues de la cabecera ethernet
 
 def parse_ipv4_header(data):
     "Extrae direcciones IP, la longitud de cabecera y protocolo de transporte"
     version_ihl = data[0]
     ihl = (version_ihl & 0xF) * 4 #longitud de cabecera en bytes 
-    ttl, proto, src, dst = struct.unpack('!8xBB2x4s4s', data[:20])
-    src_ip = socket.inet_ntoa(src)
-    dst_ip = socket.inet_ntoa(dst)
-    return proto, src_ip, dst_ip, data[ihl:]
+    ttl, proto, src, dst = struct.unpack('!8xBB2x4s4s', data[:20])# Aqui realizamos el unpacking de la cabecera ip
+    src_ip = socket.inet_ntoa(src) # Convertimos la direccion ip a formato string
+    dst_ip = socket.inet_ntoa(dst)# Convertimos la direccion ip a formato string
+    return proto, src_ip, dst_ip, data[ihl:]#el payload es todo lo que viene despues de la cabecera ip
 
 def parse_tcp_flags(flags_byte):
     "Decodifica flags TCP críticas para la detección de escaneos y SYN Floods"
@@ -34,11 +34,11 @@ def parse_tcp_flags(flags_byte):
 
 def parse_tcp_header(data): 
     "Extrae puerots y banderas tcp"
-    src_port, dest_port, seq, ack, ofset_reserved_flags = struct.unpack('!HHLLH', data[:14])
-    tcp_offset = ((ofset_reserved_flags >> 12) & 0x0F) * 4
+    src_port, dest_port, seq, ack, ofset_reserved_flags = struct.unpack('!HHLLH', data[:14]) # HHLLH indica que los primeros dos campos son de 2 bytes y el ultimo de 2 bytes. [0:14] es porque la cabecera tcp tiene 14 bytes de longitud
+    tcp_offset = ((ofset_reserved_flags >> 12) & 0x0F) * 4 #Calculamos el offset de la cabecera tcp
     flags_byte = ofset_reserved_flags & 0x3F
     flags = parse_tcp_flags(flags_byte)
-    return src_port, dest_port, flags, data[tcp_offset:]
+    return src_port, dest_port, flags, data[tcp_offset:]#el payload es todo lo que viene despues de la cabecera tcp
 
 def start_sniffer(interface = 'eth0'):
     try: 
@@ -72,7 +72,7 @@ def start_sniffer(interface = 'eth0'):
                     flow_table.add_packet(src_ip, dst_ip, src_port, dst_port, proto, pkt_size, flags)
                     
 
-                    #AQUI VA LOGICA DE ESCANEO DE PUERTOS
+                    #AQUI VA LOGICA DE ESCANEO DE PUERTOS DEL MODELO TODAVÍA NO SE INTEGRA
                     
                     flags_activas = [k for k, v in flags.items() if v]
                     if flags['SYN'] and not flags['ACK']:

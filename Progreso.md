@@ -1,36 +1,44 @@
-# Construyendo un Firewall Inteligente para el Edge: Avances y Decisiones
+# Construyendo un Firewall montado en hardware (CM) Inteligente: Avances y Decisiones
 
-¡Hola a todos! Si están leyendo esto, es porque quieren saber cómo estamos armando nuestro firewall inteligente. La idea no es hacer un firewall aburrido que solo bloquee el puerto 80 porque sí, sino dotarlo de un "cerebro" capaz de detectar comportamientos maliciosos (como escaneos de red y ráfagas de paquetes) en tiempo real.
+El presente documento detalla los avances del desarrollo logrado en la construcción de un firewall inteligente, diseñado no solo para el filtrado estático de puertos, sino para la detección proactiva y en tiempo real de comportamientos maliciosos, tales como escaneos de red y ráfagas de paquetes. A continuación, dejo un resumen de la arquitectura del sistema, la lógica operativa y la justificación tecnológica que fundamenta cada una de las decisiones tomadas durante el desarrollo.
 
-Aquí les cuento qué hemos construido, la arquitectura completa (desde la captura de paquetes hasta la Inteligencia Artificial), por qué elegimos estas tecnologías y cómo encajan todas las piezas.
+## Arquitectura del Sistema y Estado Actual
 
----
+El proyecto lo estructuré en módulos independientes para garantizar su escalabilidad y facilitar su mantenimiento. Esta arquitectura se divide en dos grandes fases: la captura de datos y el análisis mediante inteligencia artificial.
 
-## 1. Arquitectura del Sistema: ¿Qué tenemos desarrollado hasta ahora?
+En la fase de captura, el sistema interactúa directamente con la interfaz de red a través del módulo de captura cruda (`sniffer_base.py`), el cual extrae información a nivel de enlace, red y transporte de forma altamente eficiente. Posteriormente, el gestor de flujos (`flow_table.py`) agrupa lógicamente los paquetes individuales en flujos de comunicación bidireccionales, proporcionando un contexto temporal completo de cada conexión. Finalmente, el extractor de características (`extractor_vect.py`) procesa los datos de los flujos cerrados y calcula propiedades estadísticas y matemáticas para generar un vector representativo de 9 variables (preliminarmente).
 
-El proyecto se divide en módulos muy claros para asegurar escalabilidad y facilitar el mantenimiento. Todo esto ya está funcional:
+En cuanto a la fase de análisis, el sistema cuenta con un pipeline de entrenamiento (`train_edge_model.py`) que genera un modelo LightGBM a partir de millones de conexiones reales. Este modelo aprende a distinguir el tráfico legítimo de los ataques y, para optimizar su despliegue, es exportado al estándar universal ONNX (`firewall_edge_model.onnx`). Este formato produce un archivo ultraligero de aproximadamente 110 KB que opera sin depender de bibliotecas pesadas. Todo esto es validado a través de un sistema de evaluación dedicado (`evaluate_onnx_model.py`).
 
-### A. La Captura de Datos (El Oído)
-1. **Sniffer / Capturador (`sniffer_base.py`):** Interactúa directamente con la interfaz de red para capturar paquetes crudos y extraer información a nivel de enlace, red y transporte.
-2. **Gestor de Flujos (`flow_table.py`):** Agrupa lógicamente los paquetes individuales en "flujos de comunicación bidireccionales", dándonos el contexto completo de una conexión a lo largo del tiempo.
-3. **Extractor de Características (`extractor_vect.py`):** Procesa los datos de cada flujo cerrado y calcula propiedades matemáticas y estadísticas para generar el vector final de 9 variables.
+## Rendimiento y Estadísticas del Modelo
 
-### B. El Análisis con IA (El Cerebro)
-1. **Pipeline de Entrenamiento (`train_edge_model.py`):** Entrena un modelo LightGBM usando millones de conexiones reales para que aprenda a distinguir tráfico legítimo de ataques.
-2. **Exportación Universal (`ONNX`):** Empaqueta el modelo en un archivo ultraligero (`firewall_edge_model.onnx` de ~110 KB), listo para producción sin dependencias pesadas.
-3. **Sistema de Evaluación (`evaluate_onnx_model.py`):** Valida el modelo. Logramos detectar el **99.54% de Port Scans** y el **99.64% de DDoS (ráfagas)** en tráfico nuevo de prueba.
+A fin de validar empíricamente la efectividad del sistema para satisfacer los criterios de aceptación principales, se sometió al modelo a una evaluación exhaustiva empleando un conjunto de datos de prueba que la inteligencia artificial no había procesado durante su entrenamiento. Los resultados obtenidos reflejan una altísima capacidad de detección para los vectores de ataque objetivo.
 
----
+Específicamente, para los ataques de fuerza bruta y ráfagas de paquetes (tales como DDoS y flujos automatizados tipo hping3), el modelo alcanzó una precisión de detección del **99.64%** evaluado sobre un total de 25,605 muestras. Simultáneamente, para la detección de escaneos de puertos (Port Scans), el sistema logró identificar correctamente el **99.54%** de las incidencias a partir de una muestra de 31,761 conexiones. 
 
-## 2. La Lógica: ¿Cómo funciona y cómo lo integraremos?
+En lo relativo al tráfico normal de usuarios legítimos, el modelo demostró una precisión de reconocimiento del **98.51%** sobre un universo de más de 454,000 conexiones. Esto implica una tasa de falsos positivos de tan solo 1.49%. 
 
-Un error común al meter Inteligencia Artificial en seguridad es creer que el modelo debe bloquear directamente el tráfico. ¡Falso! Si hacemos eso, el inevitable 1% de error (falsos positivos) terminará bloqueando a usuarios legítimos a la primera conexión. Nuestra lógica separa la extracción matemática, el análisis de IA y el castigo.
+Para mayor claridad, el desempeño del sistema se resume en la siguiente tabla comparativa:
+
+| Tipo de Tráfico | Volumen (Conexiones Evaluadas) | Precisión de Detección | Margen de Error |
+| :--- | :--- | :--- | :--- |
+| **DDoS / Ráfagas (hping3)** | 25,605 | **99.64%** | 0.36% |
+| **Escaneo de Puertos (PortScan)** | 31,761 | **99.54%** | 0.46% |
+| **Tráfico Legítimo (BENIGN)** | 454,265 | **98.51%** | 1.49% (Falsos Positivos) |
+
+Si bien estas métricas confirman el rotundo éxito del modelo a nivel de clasificación matemática, también subrayan la necesidad imperativa del mecanismo de umbrales descrito más adelante. Dicho mecanismo de evaluación temporal garantiza que este ínfimo margen de error del 1.49% no resulte en el bloqueo accidental de usuarios reales en el entorno de producción.
+
+## Lógica Operativa e Integración
+
+Un desafío crítico en la implementación de modelos predictivos para ciberseguridad es la mitigación de los falsos positivos. Si el sistema bloqueara automáticamente cualquier conexión que el modelo marque como sospechosa, el inevitable margen de error del 1% terminaría interrumpiendo el tráfico de usuarios legítimos casi de inmediato. Por ende, la lógica de nuestro sistema separa estrictamente la evaluación de anomalías de la ejecución de bloqueos.
+
+El proceso inicia cuando el modelo actúa como un radar pasivo: si detecta una anomalía aislada, únicamente la registra. Sin embargo, si un mismo origen genera múltiples alertas en un lapso corto —por ejemplo, más de 20 advertencias en menos de 5 segundos—, el sistema lo interpreta como una amenaza confirmada (típica de un ataque automatizado). Es en este punto cuando el daemon dictamina la orden de bloqueo y delega la ejecución a `nftables`, el cual impone la restricción de red a velocidad de kernel.
 
 ```mermaid
 flowchart TD
     A[Tráfico de Red Entrante] --> B{sniffer_base.py<br>Captura Cruda}
     B --> C(flow_table.py<br>Agrupación Bidireccional)
-    C --> D(extractor_vect.py<br>Calcula 9 variables matemáticas)
+    C --> D(extractor_vect.py<br>Calcula 9 variables estadísticas)
     
     subgraph cerebro [El Cerebro - Análisis]
         D --> E(Modelo ONNX Runtime)
@@ -49,35 +57,22 @@ flowchart TD
     style I fill:#ff6666,stroke:#333,stroke-width:2px
 ```
 
-*(El modelo actúa como un radar. Si pita 1 vez, lo anotamos. Si pita 20 veces, el Daemon dicta sentencia y `nftables` ejecuta el bloqueo a velocidad del kernel).*
+## Justificación Tecnológica
 
----
+Dado que este firewall está concebido para operar en entornos Edge, con recursos de hardware limitados, cada herramienta ha sido seleccionada maximizando el rendimiento y minimizando la latencia.
 
-## 3. Justificación Tecnológica (¿Por qué usamos lo que usamos?)
+Para la captura de tráfico, se descartó el uso de bibliotecas de alto nivel como Scapy debido a su considerable sobrecarga computacional. En su lugar, se implementaron raw sockets nativos de Python (`socket.AF_PACKET`) junto con la biblioteca `struct` para el desempaquetado de bytes, lo cual garantiza una captura a muy baja latencia en entornos de producción.
 
-Cuando diseñas algo para el "Edge" (dispositivos de hardware limitados), cada decisión cuenta. Aquí el porqué de nuestras tecnologías:
+En lo referente a la gestión de memoria, la bidireccionalidad se consigue ordenando lógicamente las direcciones IP y los puertos antes de la generación de claves de flujo. Asimismo, para prevenir fugas de memoria (memory leaks), el sistema impone umbrales de inactividad, limita el número máximo de paquetes por flujo y cierra las conexiones proactivamente al detectar banderas de terminación como `FIN` o `RST`. Esta estrategia garantiza que los datos se procesen en fragmentos ligeros y evita la persistencia de conexiones inactivas.
 
-### A. Captura de Tráfico (Raw Sockets vs. Scapy)
-*   **Por qué NO Scapy:** Aunque es genial y fácil de usar, es muy pesado e introduce demasiada latencia para un entorno de producción en tiempo real.
-*   **Por qué SÍ Raw Sockets:** Usar `socket.AF_PACKET` y `struct.unpack` nativos en Python garantiza captura y desempaquetado a nivel de bytes con un rendimiento brutal.
+El motor analítico se fundamenta en conceptos estadísticos. La evaluación de la varianza temporal y del tamaño de los paquetes permite identificar fácilmente ataques automatizados, ya que estos carecen del comportamiento caótico propio de la interacción humana y tienden a mantener una varianza cercana a cero. Por otro lado, la entropía de Shannon aplicada a los puertos y a las banderas de red resulta vital para detectar escaneos; la exploración secuencial de múltiples puertos produce invariablemente una alta entropía matemática, en clara contraposición con la baja entropía del tráfico estándar reiterativo.
 
-### B. Gestión de Memoria y Flujos (Evitando Memory Leaks)
-*   **Bidireccionalidad:** Ordenamos IPs y Puertos (menor a mayor) antes de generar la clave para analizar peticiones (cliente->servidor) y respuestas (servidor->cliente) juntas.
-*   **Gestión de RAM:** Usamos umbrales de inactividad (`timeout`), un límite máximo de paquetes por flujo y cierres forzados al detectar banderas `FIN` o `RST`. Esto procesa el tráfico en "chunks" ligeros y evita fugas de memoria al no mantener conexiones zombis abiertas indefinidamente.
+Por último, la fase de inteligencia artificial emplea LightGBM en lugar de redes neuronales profundas. Esta decisión se fundamenta en la superior eficiencia de los árboles de decisión al procesar datos tabulares sin consumir excesivos recursos computacionales. Su ejecución final en producción es gestionada por ONNX Runtime, apoyado en motores de C++ y Rust, eliminando la necesidad de bibliotecas interpretadas. Adicionalmente, el proceso de bloqueo recae sobre `nftables`, cuya gestión mediante tablas hash ("sets") permite buscar y penalizar direcciones IP en tiempo constante (O(1)), resultando significativamente más ágil y escalable que el procesamiento secuencial tradicional.
 
-### C. La Magia Matemática (Varianza y Entropía de Shannon)
-*   **Varianza (Tiempos y Tamaños):** Ataques automatizados (como hping3 o SYN Flood) envían ráfagas repetitivas a intervalos exactos y tamaños idénticos (varianza casi 0). El usuario legítimo es caótico.
-*   **Entropía de Shannon (Puertos y Banderas):** Un escáner probará puertos secuencialmente, generando muchísima entropía (información muy variada). Una conexión normal a YouTube interactúa repetitivamente con el puerto 443 (entropía muy baja). ¡Matemáticas puras para atrapar atacantes!
+## Próximos Pasos
 
-### D. Inteligencia Artificial (LightGBM y ONNX)
-*   **LightGBM en lugar de Deep Learning:** Las redes neuronales son lentas y glotonas. LightGBM (árboles de decisión) es ultrarrápido y extremadamente preciso para datos tabulares (las 9 columnas matemáticas).
-*   **ONNX Runtime:** Nos permite tirar dependencias pesadas como Pandas o Scikit-Learn en producción. El firewall ejecuta el modelo en un motor C++/Rust súper optimizado.
+Con la extracción matemática habilitada para TCP/IPv4 y el modelo analítico correctamente entrenado, el enfoque inmediato del proyecto consistirá en acoplar ambos subsistemas. El objetivo prioritario es conectar en tiempo real la salida del extractor de vectores al motor de inferencia ONNX Runtime, estableciendo la comunicación necesaria para que las detecciones se propaguen hacia `nftables`.
 
-### E. Ejecución de Bloqueos (`nftables`)
-*   **Por qué NO iptables:** Revisa reglas de forma secuencial (muy lento si tu blacklist crece).
-*   **Por qué SÍ nftables:** Usa "sets" (hash tables) que verifican si una IP está bloqueada de forma instantánea, sin importar cuántas IPs haya. Perfecto para blacklists temporales.
+Es imperativo destacar que aún deben definirse y calibrarse las reglas definitivas (los umbrales precisos de tolerancia) para garantizar que el tráfico legítimo no se vea interrumpido por error ante posibles falsos positivos. Además, cabe aclarar que el despliegue final del sistema no será de carácter pasivo. El firewall operará de forma activa (inline), situándose físicamente como puente entre la interfaz WAN y el switch de la red LAN, lo cual le otorgará la capacidad de interceptar y denegar paquetes maliciosos en la frontera de la red.
 
----
-
-## Siguientes Pasos
-Ya tenemos la extracción matemática (`extractor_vect.py`) funcionando para TCP/IPv4 y nuestro cerebro artificial (`.onnx`) bien entrenado. Nuestro próximo hito es conectar los cables: lograr que el extractor pase los vectores en vivo a ONNX y construir el disparador que envíe los castigos a `nftables`. Adicionalmente, buscaremos expandir la visibilidad hacia protocolos como UDP e ICMP. ¡Ya casi está!
+De forma paralela, se proyecta extender la capacidad del analizador base para procesar y clasificar protocolos adicionales, tales como UDP e ICMP.
