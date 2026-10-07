@@ -110,7 +110,7 @@ def train_and_export(X, y, labels):
 
 if __name__ == "__main__":
     # Carpeta completa de CIC-IDS2017 (también acepta la ruta de un solo CSV)
-    CSV_PATH = "/home/valenturas_cardenas/Descargas/NSL-KDD/MachineLearningCSV/MachineLearningCVE"
+    CSV_PATH = "/home/valenturas_cardenas/Documentos/Firewall_CM/Firewall_CM/MachineLearningCVE"
 
     try:
         X, y, labels = load_and_clean_dataset(CSV_PATH)

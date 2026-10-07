@@ -17,7 +17,7 @@ import onnxruntime as ort
 
 from train_edge_model import SELECTED_FEATURES, TARGET_COLUMN
 
-DEFAULT_CSV_DIR = "/home/valenturas_cardenas/Descargas/NSL-KDD/MachineLearningCSV/MachineLearningCVE"
+DEFAULT_CSV_DIR = "/home/valenturas_cardenas/Documentos/Firewall_CM/Firewall_CM/MachineLearningCVE"
 DEFAULT_MODEL = "firewall_edge_model.onnx"
 TRAIN_FILE = "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv"
 
